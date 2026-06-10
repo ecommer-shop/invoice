@@ -1,7 +1,15 @@
 /**
- * Validación al arrancar el servidor (Next.js instrumentation hook).
+ * Validación al arrancar el servidor 
  */
 export async function register() {
+  if (process.env.NEXT_RUNTIME === 'edge') {
+    return;
+  }
+
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    return;
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     return;
   }

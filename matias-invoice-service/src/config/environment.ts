@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-interface EnvironmentConfig {
+export interface EnvironmentConfig {
   port: number;
   nodeEnv: string;
   matias: {
@@ -17,19 +17,30 @@ interface EnvironmentConfig {
     level: string;
   };
   /**
-   * Base de datos **solo del microservicio** (no usar el `DATABASE_URL` de Vendure/shop).
-   * En Railway: crea un Postgres aparte y pega aquí su URL.
+   * Base de datos
    */
   databaseUrl: string | null;
   databaseSsl: boolean;
 }
 
+let cachedConfig: EnvironmentConfig | null = null;
+
+function isBuildTime(): boolean {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    return true;
+  }
+  if (process.env.npm_lifecycle_event === 'build') {
+    return true;
+  }
+  return false;
+}
+
 function getEnvVar(key: string, defaultValue?: string): string {
   const value = process.env[key] || defaultValue;
-  if (!value && !defaultValue) {
+  if (!value && defaultValue === undefined) {
     throw new Error(`Environment variable ${key} is required but not set`);
   }
-  return value!;
+  return value ?? '';
 }
 
 function resolveDatabaseSsl(databaseUrl: string | null): boolean {
@@ -51,7 +62,6 @@ function resolveDatabaseSsl(databaseUrl: string | null): boolean {
 function normalizeApiKey(raw: string): string {
   if (!raw) return raw;
 
-  // Si el valor empieza con "VENDURE_SERVICE_API_KEY=" nos quedamos solo con la parte derecha
   const prefix = 'VENDURE_SERVICE_API_KEY=';
   if (raw.startsWith(prefix)) {
     return raw.slice(prefix.length);
@@ -60,25 +70,92 @@ function normalizeApiKey(raw: string): string {
   return raw;
 }
 
-export const config: EnvironmentConfig = {
-  port: parseInt(getEnvVar('PORT', '3010'), 10),
-  nodeEnv: getEnvVar('NODE_ENV', 'development'),
-  matias: {
-    apiUrl: getEnvVar('MATIAS_API_URL'),
-    email: getEnvVar('MATIAS_EMAIL'),
-    password: getEnvVar('MATIAS_PASSWORD'),
-  },
-  vendure: {
-    apiKey: normalizeApiKey(getEnvVar('VENDURE_SERVICE_API_KEY')),
-  },
-  logging: {
-    level: getEnvVar('LOG_LEVEL', 'info'),
-  },
-  databaseUrl: process.env.INVOICE_SERVICE_DATABASE_URL?.trim() || null,
-  databaseSsl: resolveDatabaseSsl(
-    process.env.INVOICE_SERVICE_DATABASE_URL?.trim() || null,
-  ),
-};
+function buildStubConfig(): EnvironmentConfig {
+  const databaseUrl = process.env.INVOICE_SERVICE_DATABASE_URL?.trim() || null;
 
-export const isProduction = config.nodeEnv === 'production';
-export const isDevelopment = config.nodeEnv === 'development';
+  return {
+    port: parseInt(process.env.PORT || '3010', 10),
+    nodeEnv: process.env.NODE_ENV || 'production',
+    matias: {
+      apiUrl: process.env.MATIAS_API_URL || 'https://placeholder.local',
+      email: process.env.MATIAS_EMAIL || 'build@placeholder.local',
+      password: process.env.MATIAS_PASSWORD || 'build-placeholder',
+    },
+    vendure: {
+      apiKey: normalizeApiKey(process.env.VENDURE_SERVICE_API_KEY || 'build-placeholder'),
+    },
+    logging: {
+      level: process.env.LOG_LEVEL || 'info',
+    },
+    databaseUrl,
+    databaseSsl: resolveDatabaseSsl(databaseUrl),
+  };
+}
+
+function loadConfig(): EnvironmentConfig {
+  const databaseUrl = process.env.INVOICE_SERVICE_DATABASE_URL?.trim() || null;
+
+  return {
+    port: parseInt(getEnvVar('PORT', '3010'), 10),
+    nodeEnv: getEnvVar('NODE_ENV', 'development'),
+    matias: {
+      apiUrl: getEnvVar('MATIAS_API_URL'),
+      email: getEnvVar('MATIAS_EMAIL'),
+      password: getEnvVar('MATIAS_PASSWORD'),
+    },
+    vendure: {
+      apiKey: normalizeApiKey(getEnvVar('VENDURE_SERVICE_API_KEY')),
+    },
+    logging: {
+      level: getEnvVar('LOG_LEVEL', 'info'),
+    },
+    databaseUrl,
+    databaseSsl: resolveDatabaseSsl(databaseUrl),
+  };
+}
+
+/**
+ * Configuración lazy: no valida secretos durante next build.
+ */
+export function getConfig(): EnvironmentConfig {
+  if (!cachedConfig) {
+    cachedConfig = isBuildTime() ? buildStubConfig() : loadConfig();
+  }
+  return cachedConfig;
+}
+
+function readNestedConfig(
+  root: keyof EnvironmentConfig,
+  nested?: string,
+): unknown {
+  const value = getConfig()[root];
+  if (nested && value && typeof value === 'object') {
+    return (value as Record<string, unknown>)[nested];
+  }
+  return value;
+}
+
+/** Compatibilidad con imports existentes */
+export const config = new Proxy({} as EnvironmentConfig, {
+  get(_target, prop: string) {
+    if (prop === 'matias' || prop === 'vendure' || prop === 'logging') {
+      return new Proxy(
+        {},
+        {
+          get(_nestedTarget, nestedProp: string) {
+            return readNestedConfig(prop as keyof EnvironmentConfig, nestedProp);
+          },
+        },
+      );
+    }
+    return getConfig()[prop as keyof EnvironmentConfig];
+  },
+});
+
+export function isProduction(): boolean {
+  return getConfig().nodeEnv === 'production';
+}
+
+export function isDevelopment(): boolean {
+  return getConfig().nodeEnv === 'development';
+}
