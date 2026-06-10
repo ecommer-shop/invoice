@@ -1,13 +1,6 @@
-# Railway config for matias-invoice-service (Next.js)
-# En el dashboard de Railway, configura Root Directory = matias-invoice-service
-# (o shop/matias-invoice-service si el repo es la carpeta shop).
-
-[build]
-builder = "NIXPACKS"
-buildCommand = "npm ci && npm run build"
+# Railway config for matias-invoice-service
 
 [deploy]
-startCommand = "npm start"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
