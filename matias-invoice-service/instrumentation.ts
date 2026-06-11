@@ -1,5 +1,5 @@
 /**
- * Validación al arrancar el servidor 
+ * Validación al arrancar el servidor (runtime).
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'edge') {
@@ -19,13 +19,21 @@ export async function register() {
     'MATIAS_EMAIL',
     'MATIAS_PASSWORD',
     'VENDURE_SERVICE_API_KEY',
-    'INVOICE_SERVICE_DATABASE_URL',
   ] as const;
 
-  const missing = required.filter((key) => !process.env[key]?.trim());
+  const missing: string[] = required.filter((key) => !process.env[key]?.trim());
+
+  const hasDatabase =
+    Boolean(process.env.DB_INVOICE_HOST?.trim());
+
+  if (!hasDatabase) {
+    missing.push('INVOICE_SERVICE_DATABASE_URL (o DB_INVOICE_HOST + credenciales)');
+  }
+
   if (missing.length > 0) {
     throw new Error(
-      `Variables de entorno obligatorias en producción: ${missing.join(', ')}`,
+      `Variables de entorno obligatorias en producción: ${missing.join(', ')}. ` +
+        'Para la BD usa INVOICE_SERVICE_DATABASE_URL, DATABASE_URL (Postgres Railway) o DB_INVOICE_HOST + credenciales.',
     );
   }
 }

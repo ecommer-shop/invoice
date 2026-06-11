@@ -43,6 +43,33 @@ function getEnvVar(key: string, defaultValue?: string): string {
   return value ?? '';
 }
 
+function resolveDatabaseUrl(): string | null {
+  const direct =
+    process.env.INVOICE_SERVICE_DATABASE_URL?.trim() ||
+    process.env.DATABASE_URL?.trim();
+  if (direct) {
+    return direct;
+  }
+
+  const host = process.env.DB_INVOICE_HOST?.trim();
+  if (!host) {
+    return null;
+  }
+
+  const port = process.env.DB_INVOICE_PORT?.trim() || '5432';
+  const user = process.env.DB_INVOICE_USERNAME?.trim() || process.env.DB_INVOICE_USER?.trim() || 'postgres';
+  const password = process.env.DB_INVOICE_PASSWORD?.trim() ?? '';
+  const database =
+    process.env.DB_INVOICE_NAME?.trim() ||
+    process.env.DB_INVOICE_DATABASE?.trim() ||
+    'railway';
+
+  const encodedUser = encodeURIComponent(user);
+  const encodedPassword = encodeURIComponent(password);
+
+  return `postgresql://${encodedUser}:${encodedPassword}@${host}:${port}/${database}`;
+}
+
 function resolveDatabaseSsl(databaseUrl: string | null): boolean {
   if (process.env.INVOICE_SERVICE_DB_SSL === 'true') {
     return true;
@@ -71,7 +98,7 @@ function normalizeApiKey(raw: string): string {
 }
 
 function buildStubConfig(): EnvironmentConfig {
-  const databaseUrl = process.env.INVOICE_SERVICE_DATABASE_URL?.trim() || null;
+  const databaseUrl = resolveDatabaseUrl();
 
   return {
     port: parseInt(process.env.PORT || '3010', 10),
@@ -93,7 +120,7 @@ function buildStubConfig(): EnvironmentConfig {
 }
 
 function loadConfig(): EnvironmentConfig {
-  const databaseUrl = process.env.INVOICE_SERVICE_DATABASE_URL?.trim() || null;
+  const databaseUrl = resolveDatabaseUrl();
 
   return {
     port: parseInt(getEnvVar('PORT', '3010'), 10),
