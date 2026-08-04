@@ -30,7 +30,8 @@ export function createErrorResponse(
   return NextResponse.json(
     {
       success: false,
-      error: errorName,
+      // Preferir el mensaje real (antes solía quedar solo "Error").
+      error: errorMessage || errorName,
       message: errorMessage,
       ...(details && { details }),
     },

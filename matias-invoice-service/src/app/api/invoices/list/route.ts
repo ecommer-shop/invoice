@@ -31,11 +31,12 @@ export async function GET(request: NextRequest) {
     const customerDni = sp.get('customerDni') || undefined;
     const status = sp.get('status') || undefined;
     const orderCode = sp.get('orderCode') || undefined;
+    const prefix = sp.get('prefix') || undefined;
     const take = sp.get('take') ? parseInt(sp.get('take')!, 10) : undefined;
     const skip = sp.get('skip') ? parseInt(sp.get('skip')!, 10) : undefined;
 
     const result = await repo.listInvoices(
-      { dateFrom, dateTo, customerDni, status, orderCode },
+      { dateFrom, dateTo, customerDni, status, orderCode, prefix },
       { take, skip },
     );
 

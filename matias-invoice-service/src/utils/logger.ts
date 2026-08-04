@@ -24,7 +24,7 @@ let loggerInstance: winston.Logger | null = null;
 
 function createLogger(): winston.Logger {
   const cfg = getConfig();
-  const instance = winston.createLogger({
+  return winston.createLogger({
     level: cfg.logging.level,
     format: logFormat,
     defaultMeta: { service: 'matias-invoice-service' },
@@ -34,16 +34,6 @@ function createLogger(): winston.Logger {
       }),
     ],
   });
-
-  if (cfg.nodeEnv !== 'production') {
-    instance.add(
-      new winston.transports.Console({
-        format: consoleFormat,
-      }),
-    );
-  }
-
-  return instance;
 }
 
 function getLogger(): winston.Logger {

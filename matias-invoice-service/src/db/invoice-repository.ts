@@ -265,6 +265,7 @@ export class InvoiceRepository {
       customerDni?: string;
       status?: string;
       orderCode?: string;
+      prefix?: string;
     },
     pagination?: { take?: number; skip?: number },
   ): Promise<{ items: InvoiceListRow[]; total: number }> {
@@ -291,6 +292,10 @@ export class InvoiceRepository {
     if (filter.orderCode) {
       conditions.push(`order_code = $${i++}`);
       params.push(filter.orderCode);
+    }
+    if (filter.prefix) {
+      conditions.push(`prefix = $${i++}`);
+      params.push(filter.prefix);
     }
 
     const where = conditions.join(' AND ');
@@ -345,9 +350,19 @@ export class InvoiceRepository {
     };
   }
 
-  async getTotalsByDay(dateFrom: Date, dateTo: Date): Promise<
+  async getTotalsByDay(
+    dateFrom: Date,
+    dateTo: Date,
+    prefix?: string,
+  ): Promise<
     Array<{ date: string; subtotal: string; taxTotal: string; total: string; count: number }>
   > {
+    const params: unknown[] = [dateFrom, dateTo];
+    let prefixClause = '';
+    if (prefix) {
+      params.push(prefix);
+      prefixClause = ` AND prefix = $${params.length}`;
+    }
     const raw = await this.pool.query(
       `SELECT
         (created_at::date)::text AS date,
@@ -356,15 +371,19 @@ export class InvoiceRepository {
         COALESCE(SUM(COALESCE((total)::numeric, 0)), 0)::text AS total,
         COUNT(*)::int AS count
        FROM ${TABLE}
-       WHERE created_at >= $1 AND created_at <= $2
+       WHERE created_at >= $1 AND created_at <= $2${prefixClause}
        GROUP BY (created_at::date)
        ORDER BY (created_at::date) ASC`,
-      [dateFrom, dateTo],
+      params,
     );
     return raw.rows as Array<{ date: string; subtotal: string; taxTotal: string; total: string; count: number }>;
   }
 
-  async getTotalsByMonth(dateFrom: Date, dateTo: Date): Promise<
+  async getTotalsByMonth(
+    dateFrom: Date,
+    dateTo: Date,
+    prefix?: string,
+  ): Promise<
     Array<{
       year: number;
       month: number;
@@ -374,6 +393,12 @@ export class InvoiceRepository {
       count: number;
     }>
   > {
+    const params: unknown[] = [dateFrom, dateTo];
+    let prefixClause = '';
+    if (prefix) {
+      params.push(prefix);
+      prefixClause = ` AND prefix = $${params.length}`;
+    }
     const raw = await this.pool.query(
       `SELECT
         EXTRACT(YEAR FROM created_at)::int AS year,
@@ -383,10 +408,10 @@ export class InvoiceRepository {
         COALESCE(SUM(COALESCE((total)::numeric, 0)), 0)::text AS total,
         COUNT(*)::int AS count
        FROM ${TABLE}
-       WHERE created_at >= $1 AND created_at <= $2
+       WHERE created_at >= $1 AND created_at <= $2${prefixClause}
        GROUP BY EXTRACT(YEAR FROM created_at), EXTRACT(MONTH FROM created_at)
        ORDER BY year ASC, month ASC`,
-      [dateFrom, dateTo],
+      params,
     );
     return raw.rows as Array<{
       year: number;

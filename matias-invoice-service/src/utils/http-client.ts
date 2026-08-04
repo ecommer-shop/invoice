@@ -81,7 +81,13 @@ export class HttpClient {
   }
 
   setAuthToken(token: string): void {
-    this.client.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    const normalizedToken = token
+      .trim()
+      .replace(/^Authorization:\s*/i, '')
+      .replace(/^Bearer\s+/i, '')
+      .replace(/^["']|["']$/g, '')
+      .trim();
+    this.client.defaults.headers.common['Authorization'] = `Bearer ${normalizedToken}`;
   }
 
   removeAuthToken(): void {

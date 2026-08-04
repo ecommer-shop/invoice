@@ -90,6 +90,48 @@ export function validateInvoiceByType(dto: CreateInvoiceDto): { valid: boolean; 
     }
   }
 
+  // Casa de Software: companyId + resolución (+ prefijo).
+  // El consecutivo (documentNumber) lo asigna Matias con auto-increment; no se exige al cliente.
+  const companyId = dto.matiasCompanyId?.trim();
+  if (companyId) {
+    if (!dto.resolutionNumber?.trim()) {
+      errors.push({
+        property: 'resolutionNumber',
+        constraints: {
+          isRequired:
+            'resolutionNumber is required with matiasCompanyId so Matias knows which numbering range to apply',
+        },
+      });
+    }
+    if (!dto.prefix?.trim()) {
+      errors.push({
+        property: 'prefix',
+        constraints: {
+          isRequired: 'prefix is required with matiasCompanyId',
+        },
+      });
+    }
+  } else if (dto.prefix?.trim() && dto.resolutionNumber?.trim()) {
+    // Legacy manual numbering: only when explicitly sending prefix+resolution without companyId.
+    if (!dto.documentNumber?.trim()) {
+      errors.push({
+        property: 'documentNumber',
+        constraints: {
+          isRequired:
+            'documentNumber is required in legacy mode. Prefer matiasCompanyId (Casa de Software) so Matias assigns the number.',
+        },
+      });
+    }
+  } else {
+    errors.push({
+      property: 'matiasCompanyId',
+      constraints: {
+        isRequired:
+          'matiasCompanyId (Company ID / UUID) is required. Configure it in Ventas → Matias por tienda.',
+      },
+    });
+  }
+
   return {
     valid: errors.length === 0,
     errors: errors.length > 0 ? errors : undefined,

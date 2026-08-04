@@ -9,8 +9,14 @@ export async function validateDto<T extends object>(
   DtoClass: new () => T,
   data: any
 ): Promise<{ valid: boolean; dto?: T; errors?: ValidationError[] }> {
-  const dto = plainToInstance(DtoClass, data);
-  const errors = await validate(dto);
+  const dto = plainToInstance(DtoClass, data, {
+    enableImplicitConversion: true,
+    exposeDefaultValues: true,
+  });
+  const errors = await validate(dto as object, {
+    whitelist: true,
+    forbidUnknownValues: false,
+  });
 
   if (errors.length > 0) {
     return { valid: false, errors };

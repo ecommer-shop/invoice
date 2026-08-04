@@ -33,16 +33,22 @@ export interface MatiasAuthResponse {
 
 // Matias Invoice Request (estructura completa según documentación)
 export interface MatiasInvoiceRequest {
-  resolution_number: string;
-  prefix: string;
+  /** UUID del cliente (Casa de Software). OpenAPI InvoiceRequest usa companyId. */
+  companyId?: string;
+  /** @deprecated Prefer companyId (OpenAPI). Conservado por compatibilidad. */
+  company_id?: string;
+  resolution_number?: string;
+  prefix?: string;
   notes?: string;
-  document_number: string;
+  /** Obligatorio en POST /invoice; omitido en POST /auto-increment/invoices. */
+  document_number?: string;
   date?: string;
   time?: string;
   graphic_representation: number;
   send_email: number;
   operation_type_id: number;
   type_document_id: number;
+  currency_id?: number;
   
   customer?: {
     country_id?: string;

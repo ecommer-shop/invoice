@@ -5,8 +5,35 @@ import { authenticateRequest, createAuthErrorResponse } from '@/middleware/auth.
 import { createErrorResponse, createValidationErrorResponse } from '@/middleware/error.middleware';
 import { validateDto, getRequestBody } from '@/middleware/validation.middleware';
 import { validateInvoiceByType } from '@/middleware/invoice-validation.middleware';
+import { MATIAS_BEARER_TOKEN_HEADER, MATIAS_COMPANY_ID_HEADER } from '@/constants/matias-auth.constants';
+import logger from '@/utils/logger';
 
 const invoiceService = new InvoiceService();
+
+/** Quita strings vacíos / null de campos opcionales que rompen class-validator. */
+function sanitizeInvoiceBody(body: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...body };
+  const optionalStrings = [
+    'documentNumber',
+    'matiasCompanyId',
+    'resolutionNumber',
+    'prefix',
+    'notes',
+    'date',
+    'time',
+  ] as const;
+  for (const key of optionalStrings) {
+    const value = next[key];
+    if (value === null || value === undefined) {
+      delete next[key];
+      continue;
+    }
+    if (typeof value === 'string' && value.trim() === '') {
+      delete next[key];
+    }
+  }
+  return next;
+}
 
 /**
  * Crear una nueva factura
@@ -21,7 +48,17 @@ export async function POST(request: NextRequest) {
     }
 
     // Validar y parsear body
-    const body = await getRequestBody(request);
+    const rawBody = await getRequestBody(request);
+    const matiasBearerToken = request.headers.get(MATIAS_BEARER_TOKEN_HEADER);
+    const matiasCompanyIdHeader = request.headers.get(MATIAS_COMPANY_ID_HEADER)?.trim() || '';
+
+    // Header gana sobre body: aplicar Company ID ANTES de validar tipo/flujo.
+    const body = sanitizeInvoiceBody({
+      ...(rawBody && typeof rawBody === 'object' ? rawBody : {}),
+      ...(matiasCompanyIdHeader
+        ? { matiasCompanyId: matiasCompanyIdHeader }
+        : {}),
+    });
 
     // Validar DTO
     const validation = await validateDto(CreateInvoiceDto, body);
@@ -33,14 +70,27 @@ export async function POST(request: NextRequest) {
       return createValidationErrorResponse(errors);
     }
 
-    // Validación condicional según tipo de documento
+    if (matiasCompanyIdHeader) {
+      validation.dto.matiasCompanyId = matiasCompanyIdHeader;
+    }
+
+    // Validación condicional según tipo de documento / perfil Matias
     const typeValidation = validateInvoiceByType(validation.dto);
     if (!typeValidation.valid) {
       return createValidationErrorResponse(typeValidation.errors);
     }
 
     // Crear factura
-    const invoice = await invoiceService.createInvoice(validation.dto);
+    logger.info('Received create invoice request', {
+      orderCode: validation.dto.orderCode,
+      hasMatiasCompanyId: !!validation.dto.matiasCompanyId?.trim(),
+      hasMatiasBearerToken: !!matiasBearerToken?.trim(),
+      hasDocumentNumber: !!validation.dto.documentNumber?.trim(),
+    });
+    const invoice = await invoiceService.createInvoice(validation.dto, {
+      matiasBearerToken,
+      matiasCompanyId: validation.dto.matiasCompanyId?.trim() || null,
+    });
 
     return NextResponse.json(
       {

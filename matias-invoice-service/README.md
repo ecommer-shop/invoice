@@ -62,14 +62,28 @@ El servicio estará disponible en `http://localhost:3010` (o el `PORT` que defin
 GET /api/health
 ```
 
-### Siguiente número de documento (secuencia en la BD del micro)
-Vendure llama esto antes de `POST /invoices`; no se guarda secuencia en la BD del shop.
+### Crear factura
 ```
-GET /api/sequence/next?prefix=LZT
+POST /api/invoices
 Headers:
   X-API-Key: your-api-key
+  X-Matias-Company-Id: <uuid>   # Casa de Software
 ```
-Respuesta: `{ "success": true, "data": { "prefix": "LZT", "documentNumber": "2840" } }`
+Con `matiasCompanyId` / `X-Matias-Company-Id`, el micro llama a Matias
+`POST /auto-increment/invoices?client_uuid=...` (OpenAPI oficial) y **Matias asigna el consecutivo**.
+
+### Reenviar correo
+```
+POST /api/invoices/:invoiceId/resend
+Body: { "email": "cliente@ejemplo.com" }
+```
+Usa el CUFE/trackId guardado al emitir → Matias `POST /documents/sendmail/{trackId}?client_uuid=`.
+
+### Sincronizar estado
+Preferente: Matias `POST /status/document/{trackId}?client_uuid=`.
+Fallback: `GET /invoice/{prefix}-{number}`.
+
+OpenAPI: https://api-v2.matias-api.com/api/docs
 
 ### Listado y totales (requieren `INVOICE_SERVICE_DATABASE_URL`)
 ```

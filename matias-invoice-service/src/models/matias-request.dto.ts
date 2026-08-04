@@ -8,6 +8,7 @@ import { MatiasInvoiceRequest } from '@/types/invoice.types';
 export function transformToMatiasRequest(dto: CreateInvoiceDto): MatiasInvoiceRequest {
   // Calcular totales de líneas
   let totalLineExtensionAmount = 0;
+  let totalTaxableBase = 0;
   let totalTaxAmount = 0;
 
   const lines = dto.items.map((item) => {
@@ -60,6 +61,9 @@ export function transformToMatiasRequest(dto: CreateInvoiceDto): MatiasInvoiceRe
     // Usar ?? en lugar de || para permitir taxPercent = 0 (sin impuestos)
     const taxPercent = item.taxPercent ?? 19; // IVA por defecto 19% solo si no está definido
     const taxAmount = taxPercent > 0 ? (finalLineAmount * taxPercent) / 100 : 0;
+    if (taxPercent > 0) {
+      totalTaxableBase += finalLineAmount;
+    }
     totalTaxAmount += taxAmount;
 
     const line: any = {
@@ -95,12 +99,13 @@ export function transformToMatiasRequest(dto: CreateInvoiceDto): MatiasInvoiceRe
     return line;
   });
 
-  // Si no hay impuestos, tax_exclusive_amount debe ser 0.00 (según ejemplo de Matias)
-  // Pero tax_inclusive_amount y payable_amount deben ser el total después de descuentos
-  const taxExclusiveAmount = totalTaxAmount > 0 ? totalLineExtensionAmount : 0;
-  const taxInclusiveAmount = totalTaxAmount > 0 
-    ? taxExclusiveAmount + totalTaxAmount 
-    : totalLineExtensionAmount; // Sin impuestos, el total es el monto después de descuentos
+  // Matias/DIAN: tax_exclusive_amount = base imponible (solo líneas gravadas), no el total bruto.
+  // tax_inclusive_amount = valor bruto de todas las líneas + tributos.
+  const taxExclusiveAmount = totalTaxAmount > 0 ? totalTaxableBase : 0;
+  const taxInclusiveAmount =
+    totalTaxAmount > 0
+      ? totalLineExtensionAmount + totalTaxAmount
+      : totalLineExtensionAmount;
 
   // Calcular totales legales
   const legalMonetaryTotals = {
@@ -159,10 +164,7 @@ export function transformToMatiasRequest(dto: CreateInvoiceDto): MatiasInvoiceRe
   const invoiceTime = dto.time || now.toTimeString().split(' ')[0].substring(0, 8); // HH:mm:ss
 
   const request: MatiasInvoiceRequest = {
-    resolution_number: dto.resolutionNumber,
-    prefix: dto.prefix,
     notes: dto.notes || '',
-    document_number: dto.documentNumber,
     date: invoiceDate,
     time: invoiceTime,
     graphic_representation: dto.graphicRepresentation ?? 0,
@@ -173,6 +175,27 @@ export function transformToMatiasRequest(dto: CreateInvoiceDto): MatiasInvoiceRe
     legal_monetary_totals: legalMonetaryTotals,
     payments,
   };
+
+  if (dto.documentNumber?.trim()) {
+    request.document_number = dto.documentNumber.trim();
+  } else {
+    delete (request as { document_number?: string }).document_number;
+  }
+
+  const clientUuid = dto.matiasCompanyId?.trim();
+  if (clientUuid) {
+    // OpenAPI InvoiceRequest: companyId (camelCase) + query client_uuid en la llamada HTTP.
+    // Con auto-increment no se envía document_number.
+    request.companyId = clientUuid;
+    delete request.document_number;
+  }
+  // resolution_number es obligatorio en Matias (auto-increment y legacy) para elegir el rango.
+  if (dto.resolutionNumber?.trim()) {
+    request.resolution_number = dto.resolutionNumber.trim();
+  }
+  if (dto.prefix?.trim()) {
+    request.prefix = dto.prefix.trim();
+  }
 
   // Solo agregar tax_totals si hay impuestos (según ejemplo de Matias)
   if (taxTotals.length > 0) {

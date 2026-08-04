@@ -30,7 +30,11 @@ export async function GET(request: NextRequest) {
       return createErrorResponse('dateFrom and dateTo are required', 400);
     }
 
-    const rows = await repo.getTotalsByMonth(new Date(dateFromStr), new Date(dateToStr));
+    const rows = await repo.getTotalsByMonth(
+      new Date(dateFromStr),
+      new Date(dateToStr),
+      sp.get('prefix') || undefined,
+    );
 
     return NextResponse.json({ success: true, data: rows });
   } catch (error: any) {

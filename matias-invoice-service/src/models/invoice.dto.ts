@@ -9,8 +9,9 @@ import {
   IsOptional,
   Min,
   IsBoolean,
+  ValidateIf,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 export class CustomerDto {
   @IsString()
@@ -251,16 +252,30 @@ export class CreateInvoiceDto {
   orderCode!: string;
 
   @IsString()
-  @IsNotEmpty()
-  resolutionNumber!: string;
+  @IsOptional()
+  matiasCompanyId?: string;
 
   @IsString()
-  @IsNotEmpty()
-  prefix!: string;
+  @IsOptional()
+  resolutionNumber?: string;
 
   @IsString()
-  @IsNotEmpty()
-  documentNumber!: string;
+  @IsOptional()
+  prefix?: string;
+
+  /**
+   * Solo se usa en el flujo legacy (sin companyId).
+   * Con matiasCompanyId, Matias asigna el consecutivo vía auto-increment.
+   * Empty string / null se normalizan a undefined para no fallar class-validator.
+   */
+  @Transform(({ value }) => {
+    if (value === null || value === undefined) return undefined;
+    if (typeof value === 'string' && value.trim() === '') return undefined;
+    return typeof value === 'string' || typeof value === 'number' ? String(value) : value;
+  })
+  @ValidateIf((_, value) => value !== undefined && value !== null && value !== '')
+  @IsString()
+  documentNumber?: string;
 
   @IsString()
   @IsOptional()
