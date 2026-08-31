@@ -246,7 +246,7 @@ export class MatiasApiService {
 
       if (!dup || !/ya se encuentra validado/i.test(errorMessage)) {
         logger.error('Error creating invoice in Matias:', toLoggableError(error));
-        throw new Error(`Failed to create invoice in Matias: ${errorMessage}`);
+        throw new Error(this.enrichMatiasCreateError(errorMessage, invoiceData, clientUuid));
       }
 
       const usedNum = parseInt(dup[2], 10);
@@ -387,6 +387,24 @@ export class MatiasApiService {
       error?.message ||
       'Unknown error'
     );
+  }
+
+  private enrichMatiasCreateError(
+    errorMessage: string,
+    invoiceData: MatiasInvoiceRequest,
+    clientUuid: string,
+  ): string {
+    const prefix = invoiceData.prefix?.trim() || '—';
+    const resolution = invoiceData.resolution_number?.trim() || '—';
+    let msg = `Failed to create invoice in Matias: ${errorMessage}`;
+
+    if (/resoluci[oó]n de facturaci[oó]n activa/i.test(errorMessage)) {
+      msg +=
+        ` (prefijo=${prefix}, resolución=${resolution}, company=${clientUuid}).` +
+        ' Verifica en Matias que esa resolución esté vigente hoy para ese Company ID.';
+    }
+
+    return msg;
   }
 
   private clientUuidQuery(clientUuid?: string | null): string {

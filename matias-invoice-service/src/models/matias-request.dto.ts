@@ -1,5 +1,7 @@
 import { CreateInvoiceDto, InvoiceLineDto } from './invoice.dto';
 import { MatiasInvoiceRequest } from '@/types/invoice.types';
+import { getColombiaEmissionDateTime } from '@/utils/colombia-datetime';
+import logger from '@/utils/logger';
 
 /**
  * Transforma un CreateInvoiceDto (formato interno) a MatiasInvoiceRequest
@@ -157,39 +159,15 @@ export function transformToMatiasRequest(dto: CreateInvoiceDto): MatiasInvoiceRe
     value_paid: payment.valuePaid.toFixed(2),
   }));
 
-  // Fecha y hora: DIAN requiere que la fecha de generación sea igual a la fecha de firma (hoy en Colombia, America/Bogota UTC-5).
-  // Se usa la zona horaria de Colombia para evitar que en horario nocturno (ej. después de 7:00 PM UTC-5)
-  // toISOString() devuelva la fecha UTC de mañana y DIAN rechace la factura ("La fecha debe estar entre...").
-  const now = new Date();
-  const defaultDate = now.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }); // YYYY-MM-DD en COT
-  const defaultTime = now.toLocaleTimeString('en-GB', { timeZone: 'America/Bogota', hour12: false }); // HH:mm:ss en COT
-
-  let invoiceDate = defaultDate;
-  if (dto.date?.trim()) {
-    const rawDate = dto.date.trim();
-    if (rawDate.includes('T')) {
-      try {
-        invoiceDate = new Date(rawDate).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
-      } catch {
-        invoiceDate = defaultDate;
-      }
-    } else {
-      invoiceDate = rawDate;
-    }
-  }
-
-  // Si por diferencia de huso horario invoiceDate supera la fecha actual en Colombia, ajustar a hoy
-  if (invoiceDate > defaultDate) {
-    invoiceDate = defaultDate;
-  }
-
-  let invoiceTime = dto.time?.trim() || defaultTime;
-  if (invoiceTime.includes('T') || invoiceTime.length > 8) {
-    try {
-      invoiceTime = new Date(invoiceTime).toLocaleTimeString('en-GB', { timeZone: 'America/Bogota', hour12: false });
-    } catch {
-      invoiceTime = defaultTime;
-    }
+  // DIAN: la fecha/hora del documento debe ser la de emisión (ahora en Colombia), no la del pedido ni UTC.
+  const { date: invoiceDate, time: invoiceTime } = getColombiaEmissionDateTime();
+  if (dto.date?.trim() || dto.time?.trim()) {
+    logger.info('Ignoring client date/time for Matias emission; using Colombia now', {
+      clientDate: dto.date?.trim() || null,
+      clientTime: dto.time?.trim() || null,
+      emissionDate: invoiceDate,
+      emissionTime: invoiceTime,
+    });
   }
 
   const request: MatiasInvoiceRequest = {
