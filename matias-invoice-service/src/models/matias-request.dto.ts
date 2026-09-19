@@ -3,6 +3,16 @@ import { MatiasInvoiceRequest } from '@/types/invoice.types';
 import { getColombiaEmissionDateTime } from '@/utils/colombia-datetime';
 import logger from '@/utils/logger';
 
+function normalizeMoneyToPesos(amount: number): number {
+  if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+    return 0;
+  }
+  if (Number.isInteger(amount) && Math.abs(amount) >= 100000) {
+    return amount / 100;
+  }
+  return amount;
+}
+
 /**
  * Transforma un CreateInvoiceDto (formato interno) a MatiasInvoiceRequest
  * (formato requerido por la API de Matias según documentación)
@@ -15,7 +25,7 @@ export function transformToMatiasRequest(dto: CreateInvoiceDto): MatiasInvoiceRe
 
   const lines = dto.items.map((item) => {
     const quantity = item.quantity;
-    const priceAmount = item.unitPrice;
+    const priceAmount = normalizeMoneyToPesos(item.unitPrice);
     const baseAmount = quantity * priceAmount; // Valor original sin descuentos
 
     // Calcular descuentos si existen
@@ -24,28 +34,31 @@ export function transformToMatiasRequest(dto: CreateInvoiceDto): MatiasInvoiceRe
 
     if (item.allowanceCharges && item.allowanceCharges.length > 0) {
       item.allowanceCharges.forEach((discount) => {
+        const discountAmount = normalizeMoneyToPesos(discount.amount);
+        const discountBaseAmount = normalizeMoneyToPesos(discount.baseAmount);
+
         // Validar que el descuento no exceda el base_amount (según guía de Matias)
-        if (discount.amount > discount.baseAmount) {
+        if (discountAmount > discountBaseAmount) {
           throw new Error(
-            `El descuento (${discount.amount}) no puede exceder el monto base (${discount.baseAmount}) en el item "${item.description}"`
+            `El descuento (${discountAmount}) no puede exceder el monto base (${discountBaseAmount}) en el item "${item.description}"`
           );
         }
 
         if (!discount.chargeIndicator) {
           // Es un descuento (chargeIndicator = false)
-          totalDiscount += discount.amount;
+          totalDiscount += discountAmount;
           allowanceCharges.push({
-            amount: discount.amount.toFixed(2),
-            base_amount: discount.baseAmount.toFixed(2),
+            amount: discountAmount.toFixed(2),
+            base_amount: discountBaseAmount.toFixed(2),
             charge_indicator: false,
             allowance_charge_reason: discount.allowanceChargeReason || 'Promocion',
           });
         } else {
           // Es un cargo adicional (chargeIndicator = true)
-          totalDiscount -= discount.amount; // Restar porque es un cargo
+          totalDiscount -= discountAmount; // Restar porque es un cargo
           allowanceCharges.push({
-            amount: discount.amount.toFixed(2),
-            base_amount: discount.baseAmount.toFixed(2),
+            amount: discountAmount.toFixed(2),
+            base_amount: discountBaseAmount.toFixed(2),
             charge_indicator: true,
             allowance_charge_reason: discount.allowanceChargeReason || 'Cargo adicional',
           });
@@ -122,13 +135,14 @@ export function transformToMatiasRequest(dto: CreateInvoiceDto): MatiasInvoiceRe
   const taxGroups = new Map<number, { taxAmount: number; taxableAmount: number }>();
   dto.items.forEach((item) => {
     const quantity = item.quantity;
-    const priceAmount = item.unitPrice;
+    const priceAmount = normalizeMoneyToPesos(item.unitPrice);
     const baseAmount = quantity * priceAmount;
 
     let totalDiscount = 0;
     if (item.allowanceCharges?.length) {
       item.allowanceCharges.forEach((discount) => {
-        totalDiscount += discount.chargeIndicator ? -discount.amount : discount.amount;
+        const discountAmount = normalizeMoneyToPesos(discount.amount);
+        totalDiscount += discount.chargeIndicator ? -discountAmount : discountAmount;
       });
     }
 
@@ -153,11 +167,14 @@ export function transformToMatiasRequest(dto: CreateInvoiceDto): MatiasInvoiceRe
       : [];
 
   // Transformar pagos
-  const payments = dto.payments.map((payment) => ({
-    payment_method_id: payment.paymentMethodId,
-    means_payment_id: payment.meansPaymentId,
-    value_paid: payment.valuePaid.toFixed(2),
-  }));
+  const payments = dto.payments.map((payment) => {
+    const valuePaid = normalizeMoneyToPesos(payment.valuePaid);
+    return {
+      payment_method_id: payment.paymentMethodId,
+      means_payment_id: payment.meansPaymentId,
+      value_paid: valuePaid.toFixed(2),
+    };
+  });
 
   // DIAN: la fecha/hora del documento debe ser la de emisión (ahora en Colombia), no la del pedido ni UTC.
   const { date: invoiceDate, time: invoiceTime } = getColombiaEmissionDateTime();

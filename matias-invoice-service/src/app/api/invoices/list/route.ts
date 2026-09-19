@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest, createAuthErrorResponse } from '@/middleware/auth.middleware';
 import { createErrorResponse } from '@/middleware/error.middleware';
-import { getInvoiceReadRepository } from '@/lib/invoice-read';
+import { InvoiceService } from '@/services/invoice.service';
+
+const invoiceService = new InvoiceService();
 
 /**
  * GET /api/invoices/list?dateFrom=&dateTo=&customerDni=&status=&orderCode=&take=&skip=
@@ -11,18 +13,6 @@ export async function GET(request: NextRequest) {
     const auth = authenticateRequest(request);
     if (!auth.authenticated) {
       return createAuthErrorResponse(auth.error || 'Unauthorized');
-    }
-
-    const repo = await getInvoiceReadRepository();
-    if (!repo) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Database not configured',
-          message: 'Set INVOICE_SERVICE_DATABASE_URL to enable invoice listing.',
-        },
-        { status: 503 },
-      );
     }
 
     const sp = request.nextUrl.searchParams;
@@ -35,7 +25,7 @@ export async function GET(request: NextRequest) {
     const take = sp.get('take') ? parseInt(sp.get('take')!, 10) : undefined;
     const skip = sp.get('skip') ? parseInt(sp.get('skip')!, 10) : undefined;
 
-    const result = await repo.listInvoices(
+    const result = await invoiceService.listInvoices(
       { dateFrom, dateTo, customerDni, status, orderCode, prefix },
       { take, skip },
     );

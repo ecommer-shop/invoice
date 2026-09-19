@@ -4,7 +4,7 @@ import { transformToMatiasRequest } from '@/models/matias-request.dto';
 import { InvoiceStatus, type MatiasInvoiceResponse } from '@/types/invoice.types';
 import logger from '@/utils/logger';
 import { getInvoiceDbPool } from '@/db/pool';
-import { InvoiceRepository, type InvoiceMetadata } from '@/db/invoice-repository';
+import { InvoiceRepository, type InvoiceMetadata, type InvoiceListRow } from '@/db/invoice-repository';
 import { resolveMatiasDocumentIdentity } from '@/utils/matias-document-identity';
 
 /** Fallback en memoria solo si no hay `INVOICE_SERVICE_DATABASE_URL`. */
@@ -34,16 +34,32 @@ export class InvoiceService {
     }
   }
 
+  private schemaEnsured = false;
+
   private async ready(): Promise<void> {
-    if (this.repo) {
-      await this.repo.ensureSchema();
+    if (this.repo && !this.schemaEnsured) {
+      try {
+        await this.repo.ensureSchema();
+        this.schemaEnsured = true;
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        logger.warn(
+          `Conexión a base de datos del microservicio falló (${msg}). Usando almacenamiento en memoria local.`
+        );
+        this.repo = null;
+      }
     }
   }
 
   private async findIssuedByOrderCode(orderCode: string): Promise<InvoiceMetadata | null> {
     await this.ready();
     if (this.repo) {
-      return this.repo.findIssuedByOrderCode(orderCode);
+      try {
+        return await this.repo.findIssuedByOrderCode(orderCode);
+      } catch (err: any) {
+        logger.warn(`Error al consultar BD (${err?.message || err}); usando almacenamiento en memoria.`);
+        this.repo = null;
+      }
     }
     return (
       Array.from(memoryStore.values()).find(
@@ -55,7 +71,12 @@ export class InvoiceService {
   private async findBestByOrderCode(orderCode: string): Promise<InvoiceMetadata | null> {
     await this.ready();
     if (this.repo) {
-      return this.repo.findBestByOrderCode(orderCode);
+      try {
+        return await this.repo.findBestByOrderCode(orderCode);
+      } catch (err: any) {
+        logger.warn(`Error al consultar BD (${err?.message || err}); usando almacenamiento en memoria.`);
+        this.repo = null;
+      }
     }
     const issued = Array.from(memoryStore.values()).find(
       (inv) => inv.orderCode === orderCode && inv.status === InvoiceStatus.ISSUED,
@@ -69,7 +90,12 @@ export class InvoiceService {
   private async getById(invoiceId: string): Promise<InvoiceMetadata | null> {
     await this.ready();
     if (this.repo) {
-      return this.repo.findById(invoiceId);
+      try {
+        return await this.repo.findById(invoiceId);
+      } catch (err: any) {
+        logger.warn(`Error al consultar BD (${err?.message || err}); usando almacenamiento en memoria.`);
+        this.repo = null;
+      }
     }
     return memoryStore.get(invoiceId) ?? null;
   }
@@ -77,19 +103,29 @@ export class InvoiceService {
   private async persist(meta: InvoiceMetadata): Promise<void> {
     await this.ready();
     if (this.repo) {
-      await this.repo.insert(meta);
-    } else {
-      memoryStore.set(meta.id, meta);
+      try {
+        await this.repo.insert(meta);
+        return;
+      } catch (err: any) {
+        logger.warn(`Error al insertar en BD (${err?.message || err}); guardando en memoria.`);
+        this.repo = null;
+      }
     }
+    memoryStore.set(meta.id, meta);
   }
 
   private async persistUpdate(meta: InvoiceMetadata): Promise<void> {
     await this.ready();
     if (this.repo) {
-      await this.repo.update(meta);
-    } else {
-      memoryStore.set(meta.id, meta);
+      try {
+        await this.repo.update(meta);
+        return;
+      } catch (err: any) {
+        logger.warn(`Error al actualizar en BD (${err?.message || err}); actualizando memoria.`);
+        this.repo = null;
+      }
     }
+    memoryStore.set(meta.id, meta);
   }
 
   private toResponseDto(invoice: InvoiceMetadata, message?: string): InvoiceResponseDto {
@@ -385,5 +421,192 @@ export class InvoiceService {
       logger.error('Error resending invoice:', error);
       throw error;
     }
+  }
+
+  async listInvoices(
+    filter: {
+      dateFrom?: Date;
+      dateTo?: Date;
+      customerDni?: string;
+      status?: string;
+      orderCode?: string;
+      prefix?: string;
+    },
+    pagination?: { take?: number; skip?: number },
+  ): Promise<{ items: InvoiceListRow[]; total: number }> {
+    await this.ready();
+    if (this.repo) {
+      try {
+        return await this.repo.listInvoices(filter, pagination);
+      } catch (err: any) {
+        logger.warn(`Error al consultar BD para listInvoices (${err?.message || err}); usando almacenamiento en memoria.`);
+        this.repo = null;
+      }
+    }
+
+    let items = Array.from(memoryStore.values());
+
+    if (filter.dateFrom) {
+      items = items.filter((inv) => inv.createdAt >= filter.dateFrom!);
+    }
+    if (filter.dateTo) {
+      items = items.filter((inv) => inv.createdAt <= filter.dateTo!);
+    }
+    if (filter.customerDni) {
+      items = items.filter((inv) => inv.customerDni === filter.customerDni);
+    }
+    if (filter.status) {
+      items = items.filter((inv) => inv.status === filter.status);
+    }
+    if (filter.orderCode) {
+      items = items.filter((inv) => inv.orderCode === filter.orderCode);
+    }
+    if (filter.prefix) {
+      items = items.filter((inv) => inv.prefix === filter.prefix);
+    }
+
+    items.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    const total = items.length;
+    const skip = pagination?.skip ?? 0;
+    const take = pagination?.take ?? items.length;
+    const paginated = items.slice(skip, skip + take);
+
+    const listRows: InvoiceListRow[] = paginated.map((m) => ({
+      id: m.id,
+      orderCode: m.orderCode,
+      prefix: m.prefix,
+      documentNumber: m.documentNumber,
+      typeDocumentId: m.typeDocumentId ?? 0,
+      operationTypeId: m.operationTypeId ?? 0,
+      status: String(m.status),
+      statusMessage: m.statusMessage ?? null,
+      customerName: m.customerName || '',
+      customerDni: m.customerDni || '',
+      customerEmail: m.customerEmail ?? null,
+      subtotal: m.subtotal || '0',
+      taxTotal: m.taxTotal || '0',
+      total: m.total || '0',
+      currencyCode: m.currencyCode || 'COP',
+      pdfUrl: m.pdfUrl ?? null,
+      xmlUrl: m.xmlUrl ?? null,
+      createdAt: m.createdAt,
+    }));
+
+    return { items: listRows, total };
+  }
+
+  async getTotalsByDay(
+    dateFrom: Date,
+    dateTo: Date,
+    prefix?: string,
+  ): Promise<
+    Array<{ date: string; subtotal: string; taxTotal: string; total: string; count: number }>
+  > {
+    await this.ready();
+    if (this.repo) {
+      try {
+        return await this.repo.getTotalsByDay(dateFrom, dateTo, prefix);
+      } catch (err: any) {
+        logger.warn(`Error al consultar BD para getTotalsByDay (${err?.message || err}); usando almacenamiento en memoria.`);
+        this.repo = null;
+      }
+    }
+
+    let items = Array.from(memoryStore.values()).filter(
+      (inv) => inv.createdAt >= dateFrom && inv.createdAt <= dateTo,
+    );
+    if (prefix) {
+      items = items.filter((inv) => inv.prefix === prefix);
+    }
+
+    const byDate = new Map<
+      string,
+      { subtotal: number; taxTotal: number; total: number; count: number }
+    >();
+
+    for (const inv of items) {
+      const dateStr = inv.createdAt.toISOString().slice(0, 10);
+      const entry = byDate.get(dateStr) ?? { subtotal: 0, taxTotal: 0, total: 0, count: 0 };
+      entry.subtotal += parseFloat(inv.subtotal || '0');
+      entry.taxTotal += parseFloat(inv.taxTotal || '0');
+      entry.total += parseFloat(inv.total || '0');
+      entry.count += 1;
+      byDate.set(dateStr, entry);
+    }
+
+    const sortedDates = Array.from(byDate.keys()).sort();
+    return sortedDates.map((date) => {
+      const e = byDate.get(date)!;
+      return {
+        date,
+        subtotal: e.subtotal.toFixed(2),
+        taxTotal: e.taxTotal.toFixed(2),
+        total: e.total.toFixed(2),
+        count: e.count,
+      };
+    });
+  }
+
+  async getTotalsByMonth(
+    dateFrom: Date,
+    dateTo: Date,
+    prefix?: string,
+  ): Promise<
+    Array<{
+      year: number;
+      month: number;
+      subtotal: string;
+      taxTotal: string;
+      total: string;
+      count: number;
+    }>
+  > {
+    await this.ready();
+    if (this.repo) {
+      try {
+        return await this.repo.getTotalsByMonth(dateFrom, dateTo, prefix);
+      } catch (err: any) {
+        logger.warn(`Error al consultar BD para getTotalsByMonth (${err?.message || err}); usando almacenamiento en memoria.`);
+        this.repo = null;
+      }
+    }
+
+    let items = Array.from(memoryStore.values()).filter(
+      (inv) => inv.createdAt >= dateFrom && inv.createdAt <= dateTo,
+    );
+    if (prefix) {
+      items = items.filter((inv) => inv.prefix === prefix);
+    }
+
+    const byMonth = new Map<
+      string,
+      { year: number; month: number; subtotal: number; taxTotal: number; total: number; count: number }
+    >();
+
+    for (const inv of items) {
+      const year = inv.createdAt.getFullYear();
+      const month = inv.createdAt.getMonth() + 1;
+      const key = `${year}-${month}`;
+      const entry = byMonth.get(key) ?? { year, month, subtotal: 0, taxTotal: 0, total: 0, count: 0 };
+      entry.subtotal += parseFloat(inv.subtotal || '0');
+      entry.taxTotal += parseFloat(inv.taxTotal || '0');
+      entry.total += parseFloat(inv.total || '0');
+      entry.count += 1;
+      byMonth.set(key, entry);
+    }
+
+    const keys = Array.from(byMonth.keys()).sort();
+    return keys.map((key) => {
+      const e = byMonth.get(key)!;
+      return {
+        year: e.year,
+        month: e.month,
+        subtotal: e.subtotal.toFixed(2),
+        taxTotal: e.taxTotal.toFixed(2),
+        total: e.total.toFixed(2),
+        count: e.count,
+      };
+    });
   }
 }

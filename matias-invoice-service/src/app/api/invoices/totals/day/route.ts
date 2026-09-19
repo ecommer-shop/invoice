@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest, createAuthErrorResponse } from '@/middleware/auth.middleware';
 import { createErrorResponse } from '@/middleware/error.middleware';
-import { getInvoiceReadRepository } from '@/lib/invoice-read';
+import { InvoiceService } from '@/services/invoice.service';
+
+const invoiceService = new InvoiceService();
 
 /** GET /api/invoices/totals/day?dateFrom=&dateTo= */
 export async function GET(request: NextRequest) {
@@ -11,18 +13,6 @@ export async function GET(request: NextRequest) {
       return createAuthErrorResponse(auth.error || 'Unauthorized');
     }
 
-    const repo = await getInvoiceReadRepository();
-    if (!repo) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Database not configured',
-          message: 'Set INVOICE_SERVICE_DATABASE_URL.',
-        },
-        { status: 503 },
-      );
-    }
-
     const sp = request.nextUrl.searchParams;
     const dateFromStr = sp.get('dateFrom');
     const dateToStr = sp.get('dateTo');
@@ -30,7 +20,7 @@ export async function GET(request: NextRequest) {
       return createErrorResponse('dateFrom and dateTo are required', 400);
     }
 
-    const rows = await repo.getTotalsByDay(
+    const rows = await invoiceService.getTotalsByDay(
       new Date(dateFromStr),
       new Date(dateToStr),
       sp.get('prefix') || undefined,
